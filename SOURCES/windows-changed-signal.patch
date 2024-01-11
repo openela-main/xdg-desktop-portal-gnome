@@ -1,0 +1,176 @@
+From 396a999f3e9daa0e3511e590339915e5ad9b6b31 Mon Sep 17 00:00:00 2001
+From: Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
+Date: Mon, 24 Oct 2022 16:10:00 -0300
+Subject: [PATCH 1/4] screencastwidget: Trivial style cleanup
+
+(cherry picked from commit 663994bc20a0d93264a0b68222522c68e8525ba4)
+---
+ src/screencastwidget.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/screencastwidget.c b/src/screencastwidget.c
+index cdd57dc..0009a35 100644
+--- a/src/screencastwidget.c
++++ b/src/screencastwidget.c
+@@ -266,9 +266,9 @@ connect_windows_changed_listener (ScreenCastWidget *widget)
+   g_assert (!widget->windows_changed_handler_id);
+   widget->windows_changed_handler_id =
+     g_signal_connect (widget->shell_introspect,
+-                          "windows-changed",
+-                          G_CALLBACK (on_windows_changed),
+-                          widget);
++                      "windows-changed",
++                      G_CALLBACK (on_windows_changed),
++                      widget);
+   shell_introspect_ref_listeners (widget->shell_introspect);
+ }
+ 
+-- 
+2.38.1
+
+
+From 5e7444c4ac4e0bc181a7cee9c00b3e542f77e0f6 Mon Sep 17 00:00:00 2001
+From: Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
+Date: Mon, 24 Oct 2022 16:10:31 -0300
+Subject: [PATCH 2/4] screencastwidget: Use g_clear_signal_handler
+
+Small cleanup
+
+(cherry picked from commit e0002330c41d62f49d9b58002ae1a607a79c67bf)
+---
+ src/meson.build        | 2 +-
+ src/screencastwidget.c | 5 ++---
+ 2 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/src/meson.build b/src/meson.build
+index 6d2e476..8341aa1 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -60,7 +60,7 @@ deps = [
+   declare_dependency(sources: built_sources),
+   meson.get_compiler('c').find_library('m'),
+   dependency('fontconfig'),
+-  dependency('glib-2.0', version: '>= 2.44'),
++  dependency('glib-2.0', version: '>= 2.62'),
+   dependency('gio-unix-2.0'),
+   dependency('gtk4', version: '>= 4.0'),
+   dependency('gsettings-desktop-schemas'),
+diff --git a/src/screencastwidget.c b/src/screencastwidget.c
+index 0009a35..82dd3bd 100644
+--- a/src/screencastwidget.c
++++ b/src/screencastwidget.c
+@@ -276,9 +276,8 @@ static void
+ disconnect_windows_changed_listener (ScreenCastWidget *widget)
+ {
+   g_assert (widget->windows_changed_handler_id);
+-  g_signal_handler_disconnect (widget->shell_introspect,
+-                               widget->windows_changed_handler_id);
+-  widget->windows_changed_handler_id = 0;
++  g_clear_signal_handler (&widget->windows_changed_handler_id,
++                          widget->shell_introspect);
+   shell_introspect_unref_listeners (widget->shell_introspect);
+ }
+ 
+-- 
+2.38.1
+
+
+From 6b491b555bb3514da4fcadb4147813217392724b Mon Sep 17 00:00:00 2001
+From: Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
+Date: Mon, 24 Oct 2022 18:55:51 -0300
+Subject: [PATCH 3/4] Import newer org.gnome.Shell.Introspect.xml
+
+It has a handy signal we will use soon, the "WindowsChanged" signal.
+
+(cherry picked from commit 41277ae33a9c9d54e6df7d7277854ccc79265fc2)
+---
+ data/org.gnome.Shell.Introspect.xml | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/data/org.gnome.Shell.Introspect.xml b/data/org.gnome.Shell.Introspect.xml
+index d71f241..cb19cfe 100644
+--- a/data/org.gnome.Shell.Introspect.xml
++++ b/data/org.gnome.Shell.Introspect.xml
+@@ -18,6 +18,12 @@
+     -->
+     <signal name="RunningApplicationsChanged" />
+ 
++    <!--
++        WindowsChanged:
++        @short_description: Notifies when any window opens or closes
++    -->
++    <signal name="WindowsChanged" />
++
+     <!--
+         GetRunningApplications:
+         @short_description: Retrieves the description of all running applications
+@@ -70,6 +76,14 @@
+     -->
+     <property name="AnimationsEnabled" type="b" access="read"/>
+ 
++    <!--
++       ScreenSize:
++       @short_description: The size of the screen
++
++       Since: 3
++    -->
++    <property name="ScreenSize" type="(ii)" access="read"/>
++
+     <property name="version" type="u" access="read"/>
+   </interface>
+ </node>
+-- 
+2.38.1
+
+
+From 70b25b7abb8223876f0ca509852e21ec26e3f624 Mon Sep 17 00:00:00 2001
+From: Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
+Date: Mon, 24 Oct 2022 18:56:59 -0300
+Subject: [PATCH 4/4] shellintrospect: React to "windows-changed" signal
+
+In addition to fetching the list of windows whenever a new
+listener registers, listen to the "windows-changed" signal
+from the D-Bus proxy and update the list of windows when
+Shell signals us.
+
+Fixes
+https://gitlab.gnome.org/GNOME/xdg-desktop-portal-gnome/-/issues/17
+
+(cherry picked from commit ddc82436d623a7904882230ede0049a8e3ee6595)
+---
+ src/shellintrospect.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/shellintrospect.c b/src/shellintrospect.c
+index 6b007b4..1fa8b93 100644
+--- a/src/shellintrospect.c
++++ b/src/shellintrospect.c
+@@ -189,6 +189,14 @@ shell_introspect_are_animations_enabled (ShellIntrospect *shell_introspect,
+   return TRUE;
+ }
+ 
++static void
++on_windows_changed_cb (GDBusProxy      *proxy,
++                       ShellIntrospect *shell_introspect)
++{
++  if (shell_introspect->num_listeners > 0)
++    sync_state (shell_introspect);
++}
++
+ static void
+ sync_animations_enabled (ShellIntrospect *shell_introspect)
+ {
+@@ -233,6 +241,10 @@ on_shell_introspect_proxy_acquired (GObject      *object,
+ 
+   shell_introspect->proxy = proxy;
+ 
++  g_signal_connect (proxy, "windows-changed",
++                    G_CALLBACK (on_windows_changed_cb),
++                    shell_introspect);
++
+   if (shell_introspect->num_listeners > 0)
+     sync_state (shell_introspect);
+ 
+-- 
+2.38.1
+
